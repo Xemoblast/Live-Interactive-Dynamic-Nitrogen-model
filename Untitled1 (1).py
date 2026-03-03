@@ -1,12 +1,7 @@
-# Generated from: Untitled1 (1).ipynb
-# Converted at: 2026-03-03T07:52:01.856Z
-# Next step (optional): refactor into modules & generate tests with RunCell
-# Quick start: pip install runcell
 
 import os
 print(os.getcwd())
 
-%%writefile app.py
 import streamlit as st
 import numpy as np
 from scipy.integrate import odeint
@@ -42,7 +37,6 @@ def nitrogen_model(y, t, params):
 
     return [dU_dt, dNH3_dt, dNH4_dt, dNO2_dt, dNO3_dt, dNplant_dt, dLvol_dt, dLleach_dt, dLden_dt]
 
-# --- Preset Scenarios Logic ---
 if 'params' not in st.session_state:
     st.session_state.urea = 150.0
     st.session_state.theta = 0.30
@@ -51,7 +45,6 @@ if 'params' not in st.session_state:
 st.title("Live Interactive Nitrogen Dynamics Model")
 st.markdown("Use the presets below to instantly simulate environmental conditions, or use the sidebar for fine-tuned control.")
 
-# --- Preset Buttons ---
 col1, col2, col3, col4, col5 = st.columns(5)
 
 if col1.button("Standard Baseline"):
@@ -65,14 +58,12 @@ if col4.button("Fertilizer Overload"):
 if col5.button("Fast Kinetics"):
     st.session_state.urea, st.session_state.theta, st.session_state.ku = 150.0, 0.30, 0.20
 
-# --- Sidebar Controls ---
 st.sidebar.header("Manual Adjustments")
 urea_input = st.sidebar.slider("Urea Applied (kg/ha)", 0.0, 600.0, st.session_state.urea)
 theta = st.sidebar.slider("Soil Moisture (θ)", 0.0, 1.0, st.session_state.theta)
 k_u_ref = st.sidebar.slider("Hydrolysis Rate (k_u)", 0.0, 0.5, st.session_state.ku)
 days_to_plot = st.sidebar.slider("Simulation Length (Days)", 1, 60, 30)
 
-# --- ODE Solution ---
 U0 = urea_input * 0.46
 y_init = [U0, 0, 0, 0, 0, 0, 0, 0, 0]
 # Fixed reference params based on your research scenarios
@@ -81,7 +72,6 @@ params = [k_u_ref, 0.5, 0.005, 0.01, 0.02, 0.008, 0.012, 0.02, 0.01, theta]
 t = np.linspace(0, days_to_plot * 24, 1000)
 sol = odeint(nitrogen_model, y_init, t, args=(params,))
 
-# --- Plotting ---
 fig, ax = plt.subplots(figsize=(10, 5))
 U_p, NH3_p, NH4_p, NO2_p, NO3_p, Np_p, Lv_p, Ll_p, Ld_p = sol.T
 
@@ -97,7 +87,6 @@ ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 ax.grid(True, alpha=0.2)
 st.pyplot(fig)
 
-# --- Efficiency Metrics ---
 st.subheader("Analysis & Efficiency")
 final = sol[-1]
 total_loss = final[6] + final[7] + final[8]
