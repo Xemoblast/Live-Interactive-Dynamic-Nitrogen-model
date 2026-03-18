@@ -1,13 +1,9 @@
-
-import os
-print(os.getcwd())
-
 import streamlit as st
 import numpy as np
 from scipy.integrate import odeint
 import matplotlib.pyplot as plt
+from scipy.optimize import minimize
 
-# --- Page Config ---
 st.set_page_config(page_title="Nitrogen Dynamic Model", layout="wide")
 
 def nitrogen_model(y, t, params):
@@ -37,65 +33,102 @@ def nitrogen_model(y, t, params):
 
     return [dU_dt, dNH3_dt, dNH4_dt, dNO2_dt, dNO3_dt, dNplant_dt, dLvol_dt, dLleach_dt, dLden_dt]
 
-if 'params' not in st.session_state:
-    st.session_state.urea = 150.0
-    st.session_state.theta = 0.30
-    st.session_state.ku = 0.07
+tab1, tab2 = st.tabs(["Interactive Simulator", "Inverse Prediction Mode"])
 
-st.title("Live Interactive Nitrogen Dynamics Model")
-st.markdown("Use the presets below to instantly simulate environmental conditions, or use the sidebar for fine-tuned control.")
+with tab1:
+    if 'urea' not in st.session_state:
+        st.session_state.urea = 150.0
+        st.session_state.theta = 0.30
+        st.session_state.ku = 0.07
 
-col1, col2, col3, col4, col5 = st.columns(5)
+    st.title("Live Interactive Nitrogen Dynamics Model")
+    
+    c1, c2, c3, c4, c5 = st.columns(5)
+    if c1.button("Standard Baseline"):
+        st.session_state.urea, st.session_state.theta, st.session_state.ku = 150.0, 0.30, 0.07
+    if c2.button("Extreme Drought"):
+        st.session_state.urea, st.session_state.theta, st.session_state.ku = 150.0, 0.08, 0.09
+    if c3.button("Severe Flooding"):
+        st.session_state.urea, st.session_state.theta, st.session_state.ku = 150.0, 0.50, 0.05
+    if c4.button("Fertilizer Overload"):
+        st.session_state.urea, st.session_state.theta, st.session_state.ku = 450.0, 0.32, 0.07
+    if c5.button("Fast Kinetics"):
+        st.session_state.urea, st.session_state.theta, st.session_state.ku = 150.0, 0.30, 0.20
 
-if col1.button("Standard Baseline"):
-    st.session_state.urea, st.session_state.theta, st.session_state.ku = 150.0, 0.30, 0.07
-if col2.button("Extreme Drought"):
-    st.session_state.urea, st.session_state.theta, st.session_state.ku = 150.0, 0.08, 0.09
-if col3.button("Severe Flooding"):
-    st.session_state.urea, st.session_state.theta, st.session_state.ku = 150.0, 0.50, 0.05
-if col4.button("Fertilizer Overload"):
-    st.session_state.urea, st.session_state.theta, st.session_state.ku = 450.0, 0.32, 0.07
-if col5.button("Fast Kinetics"):
-    st.session_state.urea, st.session_state.theta, st.session_state.ku = 150.0, 0.30, 0.20
+    st.sidebar.header("Manual Adjustments")
+    u_in = st.sidebar.slider("Urea Applied (kg/ha)", 0.0, 600.0, st.session_state.urea)
+    th_in = st.sidebar.slider("Soil Moisture (θ)", 0.0, 1.0, st.session_state.theta)
+    ku_in = st.sidebar.slider("Hydrolysis Rate (k_u)", 0.0, 0.5, st.session_state.ku)
+    days = st.sidebar.slider("Simulation Length (Days)", 1, 60, 30)
 
-st.sidebar.header("Manual Adjustments")
-urea_input = st.sidebar.slider("Urea Applied (kg/ha)", 0.0, 600.0, st.session_state.urea)
-theta = st.sidebar.slider("Soil Moisture (θ)", 0.0, 1.0, st.session_state.theta)
-k_u_ref = st.sidebar.slider("Hydrolysis Rate (k_u)", 0.0, 0.5, st.session_state.ku)
-days_to_plot = st.sidebar.slider("Simulation Length (Days)", 1, 60, 30)
+    U0 = u_in * 0.46
+    y0 = [U0, 0, 0, 0, 0, 0, 0, 0, 0]
+    p = [ku_in, 0.5, 0.005, 0.01, 0.02, 0.008, 0.012, 0.02, 0.01, th_in]
 
-U0 = urea_input * 0.46
-y_init = [U0, 0, 0, 0, 0, 0, 0, 0, 0]
-# Fixed reference params based on your research scenarios
-params = [k_u_ref, 0.5, 0.005, 0.01, 0.02, 0.008, 0.012, 0.02, 0.01, theta]
+    t = np.linspace(0, days * 24, 1000)
+    res = odeint(nitrogen_model, y0, t, args=(p,))
+    
+    def calc_sens(y_start, params_base, index, d=0.01):
+        s1 = odeint(nitrogen_model, y_start, t, args=(params_base,))[-1][5]
+        p_new = list(params_base)
+        p_new[index] *= (1 + d)
+        s2 = odeint(nitrogen_model, y_start, t, args=(tuple(p_new),))[-1][5]
+        return ((s2 - s1) / s1) / d if s1 != 0 else 0
 
-t = np.linspace(0, days_to_plot * 24, 1000)
-sol = odeint(nitrogen_model, y_init, t, args=(params,))
+    elas_th = calc_sens(y0, p, 9)
+    elas_ku = calc_sens(y0, p, 0)
 
-fig, ax = plt.subplots(figsize=(10, 5))
-U_p, NH3_p, NH4_p, NO2_p, NO3_p, Np_p, Lv_p, Ll_p, Ld_p = sol.T
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(t/24, res[:,0], label="Urea", color='teal')
+    ax.plot(t/24, res[:,2], label="Ammonium", color='royalblue')
+    ax.plot(t/24, res[:,4], label="Nitrate", color='crimson')
+    ax.plot(t/24, res[:,5], label="Plant N", color='green', lw=3)
+    ax.set_xlabel("Days")
+    ax.set_ylabel("kg N / ha")
+    ax.legend(loc='upper right')
+    st.pyplot(fig)
 
-ax.plot(t/24, U_p, label="Urea (N)", color='teal', lw=2)
-ax.plot(t/24, NH4_p, label="Ammonium", color='royalblue')
-ax.plot(t/24, NO3_p, label="Nitrate", color='crimson')
-ax.plot(t/24, Np_p, label="Plant N", color='green', lw=3)
-ax.fill_between(t/24, Lv_p + Ll_p + Ld_p, color='grey', alpha=0.1, label="Total Losses")
+    st.subheader("Live Sensitivity & Efficiency")
+    col_a, col_b, col_c = st.columns(3)
+    col_a.metric("NUE", f"{(res[-1,5]/U0)*100:.1f}%")
+    col_b.metric("Moisture Elasticity", f"{elas_th:.3f}")
+    col_c.metric("Kinetics Elasticity", f"{elas_ku:.3f}")
+    
+    st.latex(r"S_{moisture} = \frac{\partial N_{plant}}{\partial \theta} \cdot \frac{\theta}{N_{plant}}")
 
-ax.set_xlabel("Time (Days)")
-ax.set_ylabel("Nitrogen (kg N / ha)")
-ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-ax.grid(True, alpha=0.2)
-st.pyplot(fig)
+with tab2:
+    st.title("Inverse Regression Mode")
+    st.write("Input your observed field Nitrogen values, and the model will predict the environmental conditions (θ and Urea) required to reach them.")
+    
+    target_plant = st.number_input("Observed Plant N (kg/ha)", value=50.0)
+    target_loss = st.number_input("Observed Total Loss (kg/ha)", value=20.0)
+    
+    if st.button("Predict Environmental Parameters"):
+        def fit_func(x):
+            u_try, th_try = x
+            u0_try = u_try * 0.46
+            p_try = [0.07, 0.5, 0.005, 0.01, 0.02, 0.008, 0.012, 0.02, 0.01, th_try]
+            sol_try = odeint(nitrogen_model, [u0_try,0,0,0,0,0,0,0,0], t, args=(p_try,))[-1]
+            p_out = sol_try[5]
+            l_out = sol_try[6] + sol_try[7] + sol_try[8]
+            return (p_out - target_plant)**2 + (l_out - target_loss)**2
 
-st.subheader("Analysis & Efficiency")
-final = sol[-1]
-total_loss = final[6] + final[7] + final[8]
-efficiency = (final[5] / U0) * 100 if U0 > 0 else 0
-
-m1, m2, m3 = st.columns(3)
-m1.metric("Plant Uptake", f"{final[5]:.2f} kg N/ha")
-m2.metric("Environmental Loss", f"{total_loss:.2f} kg N/ha", delta_color="inverse")
-m3.metric("N-Use Efficiency (NUE)", f"{efficiency:.1f}%")
+        opt = minimize(fit_func, x0=[200, 0.3], bounds=[(0, 600), (0.01, 0.99)])
+        u_pred, th_pred = opt.x
+        
+        st.success(f"Predicted Urea Applied: {u_pred:.1f} kg/ha")
+        st.success(f"Predicted Soil Moisture (θ): {th_pred:.2f}")
+        
+        u0_final = u_pred * 0.46
+        p_final = [0.07, 0.5, 0.005, 0.01, 0.02, 0.008, 0.012, 0.02, 0.01, th_pred]
+        res_f = odeint(nitrogen_model, [u0_final,0,0,0,0,0,0,0,0], t, args=(p_final,))
+        
+        fig2, ax2 = plt.subplots(figsize=(10, 4))
+        ax2.plot(t/24, res_f[:,5], color='green', label="Predicted Plant N")
+        ax2.plot(t/24, res_f[:,6]+res_f[:,7]+res_f[:,8], color='black', linestyle='--', label="Predicted Losses")
+        ax2.set_title("Predicted System Trajectory")
+        ax2.legend()
+        st.pyplot(fig2)
 
 st.write("---")
-st.caption("Model based on first-order kinetics and moisture-scaling functions validated against Pacholski et al. (2019).")
+st.caption("Nitrogen Cycle Dynamics v2.0 | Normalized Sensitivity Analysis Included")
